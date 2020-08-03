@@ -1,0 +1,111 @@
+---
+title: "R Notebook for water masses in NES-LTER underway data"
+output: html_notebook
+---
+
+Developed by Ayanna Butler as an NES-LTER REU in the Woods Hole PEP, with mentors Stace Beaulieu and Joe Futrelle at WHOI.
+July 2020
+
+The purpose of this notebook is to identify different water masses using salinity in surface waters of the Northeast U.S. Shelf.
+
+# Import libraries and data
+
+```{r, results='hide'}
+library(tidyverse) # dplyr, ggplot2
+library(mapdata)
+library(oce)
+library(metR)
+#load data
+en644 <- read_csv("https://nes-lter-data.whoi.edu/api/underway/en644.csv")
+
+```
+# Create contour plot
+This will create contour lines in the background of the plot 
+```{r}
+t = seq(-2,30,.5)
+s = seq(30,37,.05)
+tscont <- tibble(temp = rep(t, times = length(s)),
+                 sal = rep(s, each = length(t)),
+                 rho = oce::swSigma0(sal,temp,0))
+```
+# Set guess limits for shelf and slope water
+This provides boundaries on the plot to delineate shelf, transition, and slope water
+```{r}
+wmshelfsalmin = 30
+wmshelfmax = 32.25
+wmslopemin = 34
+wmslopemax = 35.25
+```
+
+# Make the temperature and salinity plot
+Use the ggplot package to plot salinity vs. temperature and color the plot based on the latitude readings for the data
+```{r}
+#add the background contours first using the tscont data set
+# then add the points from the underway data (can use geom_path also)
+# FOR MULTIPLE PROFILES OR UNDERWAY DATA COLOR BY LATITUDE
+# COLOR BY DEPTH IF PLOTTING A SINGLE CTD PROFILE
+ggplot(en644, aes(tsg2_salinity, tsg1_sst, color = gps_furuno_latitude)) +
+  geom_contour(aes(sal, temp, z = rho), data = tscont, breaks = seq(0,100,0.5), color = "grey70") +
+  geom_text_contour(aes(sal, temp, z = rho), data = tscont, breaks = seq(0,100,0.5), color = "grey70") +
+  geom_point() + 
+  #coord_cartesian(xlim = range(en644$tsg2_salinity, na.rm = TRUE),
+  coord_cartesian(xlim = c(30, 37),
+                  ylim = range(en644$tsg1_sst, na.rm = TRUE)) +
+annotate("rect", xmin=c(wmshelfsalmin,wmslopemin), xmax=c(wmshelfmax,wmslopemax), ymin=c(19,26) , ymax=c(25.5,27.75), alpha=0.2, color="blue", fill="blue")+
+  labs(x = "Salinity", y = "Temperature (ºC)" )
+```
+
+
+# Categorize water masses
+This will add a column to the data frame with water mass categories.
+```{r}
+# water mass categories:
+# not applicable, shelf, transition, slope, gulf stream influenced
+# identify salinity column in the data frame and compare the value against the range
+# populate a new WaterMass column with the determined category
+# creating a new column based on conditional in an existing column
+# https://stackoverflow.com/questions/15016723/how-to-add-column-into-a-dataframe-based-on-condition
+en644WaterMass<-en644 %>%
+  mutate(WaterMass = case_when(tsg2_salinity >= wmslopemax ~ 'Gulf Stream Influenced',
+                                tsg2_salinity >= wmslopemin ~ 'Slope Water',
+                               tsg2_salinity >=  wmshelfmax ~ ' Transition Water',
+                               tsg2_salinity >= wmshelfsalmin ~ 'Shelf Water',
+                                  TRUE ~ 'Not Applicable'))
+    # mutate(WaterMass = case_when(tsg2_salinity >= 35.5 ~ 'Gulf Stream Influenced',
+    #                               tsg2_salinity >= 35 ~ 'Slope Water',
+    #                              tsg2_salinity >=  34 ~ ' Transition Water',
+    #                              tsg2_salinity >= 30 ~ 'Shelf Water',
+    #                               TRUE ~ 'Not Applicable'))
+
+# let's check if we have any rows determined as Gulf Stream Influenced or Slope Water
+gsi <- filter(en644WaterMass, WaterMass == 'Gulf Stream Influenced')
+nrow(gsi)
+slope <- filter(en644WaterMass, WaterMass == 'Slope Water')
+nrow(slope)
+```
+
+# For mapping, set the limits for the longitude and latitude coordinates
+We are working in the NW Atlantic/ New England region of the shelf and the specific coordinates to identify that region need to be put in place.
+
+```{r}
+xlims <- c(-72,-69.5)
+ylims <- c(39,42.5)
+```
+
+# Plot underway data on map 
+Use the ggplot package to plot the positions colored by water mass.
+
+```{r}
+#make map
+# ggplot(en644WaterMass, aes(lon,lat)) +
+# ggplot allows you to assign aesthetics based on column names
+ggplot(en644WaterMass, aes(gps_furuno_longitude,gps_furuno_latitude)) +
+  geom_point(aes(color = WaterMass)) +
+  geom_polygon(aes(long, lat, group = group), data = map_data("world"), fill = "grey50") +
+  coord_quickmap(xlim = xlims, ylim = ylims) +
+  labs(x = NULL, y = NULL)
+```
+# The Next Steps
+* Incorporate NEFSC long-term data to be able to understand the range in the  temperature-salinity plots. 
+* Separate this cruise track outbound vs inbound, since points may be taken up to 5 days apart.
+* Use higher resolution map data from Ben Harden, or perhaps try R leaflet package with same tileset as IFCB Dashboard.
